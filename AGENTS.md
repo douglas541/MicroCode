@@ -22,6 +22,7 @@ MicroCode is a terminal coding agent, written in JavaScript ESM for Node.js 22+.
 - `src/approval.js`: inline numbered approval cards. Tool edit grants are session-scoped; shell grants must match the exact command and canonical cwd.
 - `src/commands.js`, `src/chat-input.js`: slash-command catalog and live autocomplete in the chat prompt; keep suggestions separate from approval choices.
 - Show slash suggestions above the input line, preserve visible transcript when their height changes, and keep the lower status area to one/two rows; model tool support belongs in the model selector.
+- Keep the bordered chat input visible after submission and throughout inference/tool execution. Scroll only the transcript above it; preserve background drafts and /btw input across status updates, dialogs and resize, without replaying UI frames into scrollback.
 - `src/markdown.js`: terminal Markdown rendering; apply only to presentation, preserving raw responses in conversation history and code-block contents.
 - User requests use a width-aware highlighted block on submission and history replay; preserve literal input, reset background per row, honor NO_COLOR and keep command echoes compact.
 - Agent commentary with pending tool calls is a compact progress block; reserve the named assistant heading for final answers and align tool/result continuations across resize.
@@ -33,6 +34,7 @@ MicroCode is a terminal coding agent, written in JavaScript ESM for Node.js 22+.
 - Never treat absent pricing as zero or unknown tool support as confirmed support.
 - `/btw` must not append anything to the main conversation or execute tools.
 - Keep branded interface and documentation specific to MicroCode.
+- Always update the version for app changes prepared for release. `package.json.version` is the single source of truth for npm metadata and `src/version.js`; the banner, `--version` and HTTP user agents must match it. Never hardcode a separate app version. Automatic releases may advance the version in the runner, and tests must verify the current manifest version rather than a fixed release number.
 - Use pnpm 12.10.1 (pinned in `package.json`) and keep `pnpm-lock.yaml` in sync.
 - Verify changes with `pnpm check` and `pnpm test`.
 - Tests use fake credentials/local HTTP APIs, never paid external inference.

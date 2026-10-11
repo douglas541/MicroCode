@@ -4,7 +4,7 @@ import { estimateTokens, totals } from "./metrics.js";
 import { interactivePicker, fitLine } from "./picker.js";
 import { captureKeys, printable } from "./terminal-input.js";
 import { approvalMenu, toolPreview } from "./approval.js";
-import { interactiveChatInput } from "./chat-input.js";
+import { chatInputPanel, interactiveChatInput } from "./chat-input.js";
 import { COMMAND_DEFINITIONS } from "./commands.js";
 import { renderMarkdown } from "./markdown.js";
 import { conversationMessages, isContextSummary } from "./history.js";
@@ -82,11 +82,14 @@ export class UI {
   constructor({ input = process.stdin, output = process.stdout } = {}) {
     this.input = input;
     this.transcriptRecords = [];
+    this.chatInputVisible = false;
+    this.chatLabel = "  ❯ ";
     this.footer = new TerminalFooter({
       input,
       output,
       getLines: (width, height) => this.footerLines(width, height),
       getTranscript: (width, rows) => this.viewportTranscript(width, rows),
+      getInput: (columns, rows) => this.backgroundInput(columns, rows),
     });
     this.stdout = this.footer.view;
     this.queue = [];
@@ -99,7 +102,10 @@ export class UI {
     this.chatHistory = [];
     this.output = new Writable({
       write: (chunk, encoding, done) => {
-        if (!this.muted) this.stdout.write(chunk, encoding);
+        if (!this.muted) {
+          if (this.footer.inputFrame) this.footer.redraw();
+          else this.stdout.write(chunk, encoding);
+        }
         done();
       },
     });
@@ -133,6 +139,8 @@ export class UI {
         resolve(line);
       } else if (this.onBackgroundLine && line.startsWith("/btw ")) {
         this.recordInput("  ❯ ", line);
+        if (this.footer.inputFrame)
+          this.stdout.write(this.submittedInput("  ❯ ", line) + "\n");
         this.onBackgroundLine(line);
       } else this.queue.push(line);
     });
@@ -266,6 +274,31 @@ export class UI {
       for (const record of this.deferredOutput.splice(0))
         this.print(record.message, { render: record.render });
   }
+  backgroundInput(columns, rows) {
+    if (!this.chatInputVisible || this.rawInputActive || this.closed)
+      return null;
+    const line = clean(this.rl.line || "");
+    return chatInputPanel({
+      characters: [...line],
+      cursor: [...clean((this.rl.line || "").slice(0, this.rl.cursor))].length,
+      label: this.chatLabel,
+      columns,
+      rows: Math.max(1, rows - 1),
+      theme: color,
+    });
+  }
+  inputDraft() {
+    return this.footer.inputFrame
+      ? { line: this.rl.line, cursor: this.rl.cursor }
+      : null;
+  }
+  restoreChatInput(draft) {
+    if (draft) {
+      this.rl.line = draft.line;
+      this.rl.cursor = draft.cursor;
+    }
+    if (!this.closed) this.footer.restoreInput();
+  }
   ask(label, { secret = false, signal, commands = false } = {}) {
     this.clearProgress();
     if (signal?.aborted) return Promise.reject(signal.reason);
@@ -276,6 +309,9 @@ export class UI {
       if (commands && this.stdout.isTTY) {
         this.recordInput(label, value, { conversation: true });
         this.stdout.write(this.submittedInput(label, value) + "\n");
+        this.chatLabel = clean(label);
+        this.chatInputVisible = true;
+        this.restoreChatInput();
       }
       return Promise.resolve(value);
     }
@@ -283,6 +319,11 @@ export class UI {
     if (commands && this.input.isTTY && this.stdout.isTTY)
       return this.chatPrompt(label, signal);
     return new Promise((resolve, reject) => {
+      const draft = this.inputDraft();
+      if (draft) {
+        this.rl.line = "";
+        this.rl.cursor = 0;
+      }
       const detach = this.stdout.attachOverlay?.({
         kind: "readline",
         getHeight: () => 1,
@@ -291,6 +332,7 @@ export class UI {
         detach?.();
         this.waiter = null;
         this.muted = false;
+        this.restoreChatInput(draft);
         reject(signal.reason);
       };
       signal?.addEventListener("abort", abort, { once: true });
@@ -301,6 +343,7 @@ export class UI {
         resolve: (value) => {
           detach?.();
           signal?.removeEventListener("abort", abort);
+          this.restoreChatInput(draft);
           resolve(value);
         },
       };
@@ -312,6 +355,7 @@ export class UI {
     });
   }
   async chatPrompt(label, signal) {
+    this.chatLabel = clean(label);
     this.rawInputActive = true;
     try {
       const value = await interactiveChatInput({
@@ -322,6 +366,9 @@ export class UI {
         history: this.chatHistory,
         theme: color,
         formatSubmitted: (value) => this.submittedInput(label, value),
+        initialText: this.rl.line || "",
+        initialCursor: [...(this.rl.line || "").slice(0, this.rl.cursor)]
+          .length,
         signal,
         registerCancel: (cancel) => {
           this.cancelInput = cancel;
@@ -334,13 +381,16 @@ export class UI {
       }
       if (value != null)
         this.recordInput(clean(label), value, { conversation: true });
+      this.chatInputVisible = true;
       return value;
     } finally {
       this.rawInputActive = false;
+      this.restoreChatInput();
       this.flushOutput();
     }
   }
   async secret(label, signal) {
+    const draft = this.inputDraft();
     const value = [];
     this.rawInputActive = true;
     const render = () => {
@@ -391,8 +441,9 @@ export class UI {
     } finally {
       detach?.();
       this.stdout.removeListener("resize", render);
-      this.rawInputActive = false;
       this.stdout.write("\n");
+      this.rawInputActive = false;
+      this.restoreChatInput(draft);
       this.flushOutput();
     }
   }
@@ -408,6 +459,7 @@ export class UI {
     this.clearProgress();
     if (this.closed && !this.queue.length) return null;
     if (this.input.isTTY && this.stdout.isTTY) {
+      const draft = this.inputDraft();
       this.rawInputActive = true;
       try {
         return await interactivePicker({
@@ -429,6 +481,7 @@ export class UI {
         });
       } finally {
         this.rawInputActive = false;
+        this.restoreChatInput(draft);
         this.flushOutput();
       }
     }
@@ -457,6 +510,7 @@ export class UI {
     this.clearProgress();
     if (this.closed && !this.queue.length) return "deny";
     if (this.input.isTTY && this.stdout.isTTY) {
+      const draft = this.inputDraft();
       this.rawInputActive = true;
       try {
         return await approvalMenu({
@@ -478,6 +532,7 @@ export class UI {
         });
       } finally {
         this.rawInputActive = false;
+        this.restoreChatInput(draft);
         this.flushOutput();
       }
     }

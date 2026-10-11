@@ -1,6 +1,6 @@
 {
   "name": "@microcode-org/microcode",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Terminal coding agent with native and text-based tool calling",
   "repository": {
     "type": "git",

@@ -160,6 +160,41 @@ export class ChatInputState {
 
 const visible = (text) => text.replaceAll("\n", "↵").replaceAll("\t", "⇥");
 
+export function chatInputPanel({
+  characters = [],
+  cursor = characters.length,
+  label = "  ❯ ",
+  columns = 100,
+  rows = 24,
+  theme = {},
+}) {
+  const paint = (value) => value;
+  const prompt = fitLine(label, Math.max(1, columns - 3));
+  const available = Math.max(1, columns - cellWidth(prompt) - 1);
+  let offset = 0;
+  while (
+    offset < cursor &&
+    cellWidth(visible(characters.slice(offset, cursor).join(""))) >= available
+  )
+    offset++;
+  const cursorColumn = Math.min(
+    Math.max(0, columns - 1),
+    cellWidth(prompt) +
+      cellWidth(visible(characters.slice(offset, cursor).join(""))),
+  );
+  const lines = [];
+  if (rows >= 3)
+    lines.push((theme.muted || paint)("─".repeat(Math.max(1, columns - 1))));
+  const inputIndex = lines.length;
+  lines.push(
+    (theme.orange || paint)(prompt) +
+      fitLine(visible(characters.slice(offset).join("")), available),
+  );
+  if (rows >= 3)
+    lines.push((theme.muted || paint)("─".repeat(Math.max(1, columns - 1))));
+  return { lines, cursorColumn, inputIndex };
+}
+
 export async function interactiveChatInput({
   input,
   output,
@@ -171,9 +206,17 @@ export async function interactiveChatInput({
   registerCancel,
   onInterrupt,
   formatSubmitted,
+  initialText = "",
+  initialCursor,
 }) {
   signal?.throwIfAborted();
   const state = new ChatInputState({ history });
+  state.setText(initialText);
+  if (initialCursor != null)
+    state.cursor = Math.max(
+      0,
+      Math.min(state.characters.length, initialCursor),
+    );
   output.write("\x1b[?2004h");
   const identity = (value) => value;
   const color = {
@@ -187,27 +230,16 @@ export async function interactiveChatInput({
   const buildFrame = () => {
     const columns = Math.max(1, output.columns || 100);
     const rows = Math.max(1, (output.rows || 24) - 1);
-    const prompt = fitLine(label, Math.max(1, columns - 3));
-    const available = Math.max(1, columns - cellWidth(prompt) - 1);
-    let offset = 0;
-    while (
-      offset < state.cursor &&
-      cellWidth(
-        visible(state.characters.slice(offset, state.cursor).join("")),
-      ) >= available
-    )
-      offset++;
-    const draft = visible(state.characters.slice(offset).join(""));
-    const cursorColumn = Math.min(
-      Math.max(0, columns - 1),
-      cellWidth(prompt) +
-        cellWidth(
-          visible(state.characters.slice(offset, state.cursor).join("")),
-        ),
-    );
+    const panel = chatInputPanel({
+      characters: state.characters,
+      cursor: state.cursor,
+      label,
+      columns,
+      rows,
+      theme: color,
+    });
     const lines = [];
-    const borders = rows >= 3;
-    const inputHeight = borders ? 3 : 1;
+    const inputHeight = panel.lines.length;
     const matches = state.matches;
     if (matches.length && rows > inputHeight) {
       const heading = rows >= inputHeight + 5;
@@ -247,11 +279,9 @@ export async function interactiveChatInput({
           ),
         );
     }
-    if (borders) lines.push(color.muted("─".repeat(Math.max(1, columns - 1))));
-    const inputIndex = lines.length;
-    lines.push(color.orange(prompt) + fitLine(draft, available));
-    if (borders) lines.push(color.muted("─".repeat(Math.max(1, columns - 1))));
-    return { lines, cursorColumn, inputIndex };
+    const inputIndex = lines.length + panel.inputIndex;
+    lines.push(...panel.lines);
+    return { lines, cursorColumn: panel.cursorColumn, inputIndex };
   };
   const render = () => {
     const { lines, cursorColumn, inputIndex } = buildFrame();

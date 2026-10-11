@@ -26,6 +26,7 @@ class ContentViewport extends EventEmitter {
   }
   attachOverlay(overlay) {
     this.footer.overlay = overlay;
+    if (this.footer.inputCursorActive) this.footer.repaint(false);
     return () => {
       if (this.footer.overlay === overlay) this.footer.overlay = null;
     };
@@ -50,9 +51,10 @@ export class TerminalFooter {
     output,
     getLines,
     getTranscript = () => [],
+    getInput = () => null,
     height = 2,
   }) {
-    Object.assign(this, { input, output, getLines, getTranscript });
+    Object.assign(this, { input, output, getLines, getTranscript, getInput });
     this.maxHeight = height;
     this.layout = terminalDimensions(output);
     this.active = false;
@@ -61,6 +63,8 @@ export class TerminalFooter {
     this.alternate = false;
     this.overlay = null;
     this.repainting = false;
+    this.inputCursorActive = false;
+    this.inputHeight = 0;
     this.view = new ContentViewport(this);
     this.onResize = () => this.resize();
     output.on?.("resize", this.onResize);
@@ -84,15 +88,49 @@ export class TerminalFooter {
     return Math.max(1, this.layout.rows - this.height);
   }
   get margins() {
-    return this.active ? `\x1b[1;${this.contentRows}r` : "\x1b[r";
+    return this.active
+      ? `\x1b[1;${Math.max(1, this.contentRows - (this.inputFrame?.lines.length || 0))}r`
+      : "\x1b[r";
+  }
+  get inputFrame() {
+    return this.active && !this.closed && !this.alternate && !this.overlay
+      ? this.getInput(this.layout.columns, this.contentRows)
+      : null;
   }
   frame() {
     if (!this.active || this.closed) return "";
     const lines = this.getLines(this.layout.columns, this.height);
-    let frame = SAVE;
+    const input = this.inputFrame;
+    const inputStart = this.contentRows - (input?.lines.length || 0) + 1;
+    let frame = (this.inputCursorActive ? RESTORE : "") + SAVE;
+    this.inputCursorActive = Boolean(input);
+    this.inputHeight = input?.lines.length || 0;
+    if (input)
+      for (const [i, line] of input.lines.entries())
+        frame += `\x1b[${inputStart + i};1H\x1b[2K${line}`;
     for (let i = 0; i < this.height; i++)
       frame += `\x1b[${this.contentRows + i + 1};1H\x1b[2K${lines[i] || ""}`;
-    return frame + RESTORE;
+    return (
+      frame +
+      RESTORE +
+      (input
+        ? `\x1b[${inputStart + input.inputIndex};${input.cursorColumn + 1}H`
+        : "")
+    );
+  }
+  restoreInput() {
+    const input = this.inputFrame;
+    if (!input || this.inputCursorActive) return;
+    const rows = Math.min(input.lines.length, this.contentRows - 1);
+    // Move committed output above the input once. Later writes scroll only the
+    // transcript region; neither the input nor the status enters scrollback.
+    this.output.write(
+      `\x1b[?25l\x1b[1;${this.contentRows}r\x1b[${rows}S` +
+        this.margins +
+        `\x1b[${this.contentRows - rows};1H` +
+        this.frame() +
+        "\x1b[?25h",
+    );
   }
   start() {
     if (this.closed) return false;
@@ -114,6 +152,10 @@ export class TerminalFooter {
   write(text, done) {
     let content = this.view.isTTY ? text.replace(/\r?\n/g, "\r\n") : text;
     if (this.view.isTTY && !this.closed) {
+      if (this.inputCursorActive) {
+        content = RESTORE + content;
+        this.inputCursorActive = false;
+      }
       if (content.includes("\x1b[?1049h")) this.alternate = true;
       if (content.includes("\x1b[?1049l")) {
         this.alternate = false;
@@ -137,16 +179,24 @@ export class TerminalFooter {
     if (this.closed || !this.view.isTTY) return;
     this.repainting = true;
     try {
+      const input = this.inputFrame;
       const reserve = this.alternate
         ? this.contentRows
         : Math.max(
             1,
-            Math.min(this.contentRows, this.overlay?.getHeight?.() || 1),
+            Math.min(
+              this.contentRows,
+              this.overlay?.getHeight?.() || input?.lines.length || 1,
+            ),
           );
       const available = Math.max(0, this.contentRows - reserve);
       const rows = this.alternate
         ? []
-        : this.getTranscript(this.layout.columns, available);
+        : this.getTranscript(
+            this.layout.columns,
+            Math.max(0, available - Number(Boolean(input))),
+          );
+      this.inputCursorActive = false;
       // ED 2 archives the old viewport in Windows Terminal. Home + ED 0 clears
       // the same cells in place, without adding retired UI frames to scrollback.
       this.output.write(
@@ -154,7 +204,7 @@ export class TerminalFooter {
           this.margins +
           "\x1b[H" +
           (rows.length ? rows.join("\r\n") + "\r\n" : "") +
-          `\x1b[${Math.max(1, this.contentRows - reserve + 1)};1H`,
+          `\x1b[${input ? Math.max(1, Math.min(available, rows.length + 1)) : Math.max(1, this.contentRows - reserve + 1)};1H`,
       );
       if (notify) this.view.emit("resize");
       this.output.write(this.frame() + "\x1b[?25h");
@@ -179,9 +229,16 @@ export class TerminalFooter {
   close() {
     if (this.closed) return;
     if (this.started && this.view.isTTY) {
-      let clear = SAVE;
-      for (let i = 0; i < this.height; i++)
-        clear += `\x1b[${this.contentRows + i + 1};1H\x1b[2K`;
+      let clear = (this.inputCursorActive ? RESTORE : "") + SAVE;
+      for (
+        let row =
+          this.contentRows -
+          (this.inputCursorActive ? this.inputHeight : 0) +
+          1;
+        row <= this.layout.rows;
+        row++
+      )
+        clear += `\x1b[${row};1H\x1b[2K`;
       this.output.write(clear + "\x1b[r" + RESTORE + "\x1b[?25h");
     }
     this.active = false;

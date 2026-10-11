@@ -241,6 +241,133 @@ test("Submitted user requests are highlighted once, remain styled after resize a
   assert.equal(await next, "rascunho");
 });
 
+test("The bordered input remains visible after submission, between inference steps and while tools print", async (t) => {
+  const { ui, input, screen, session, model, stats } = terminal(t);
+  screen.archiveOnEraseAll = true;
+  ui.status(session, model, "text", stats);
+  const request = ui.ask("  ❯ ", { commands: true });
+  input.write("Quero mais detalhes\r");
+  assert.equal(await request, "Quero mais detalhes");
+  const assertInput = () => {
+    assert.match(screen.line(ui.stdout.rows - 3), /─{10}/);
+    assert.equal(screen.line(ui.stdout.rows - 2).trim(), "❯");
+    assert.match(screen.line(ui.stdout.rows - 1), /─{10}/);
+    assert.match(screen.footer()[0], /BUILD/);
+  };
+  assertInput();
+  ui.start("text", "agent");
+  ui.token("Vou pesquisar.", "text", "agent");
+  ui.drawProgress();
+  assertInput();
+  ui.stop("agent");
+  ui.answer("Vou pesquisar os detalhes.", "agent", { phase: "progress" });
+  ui.tool({ name: "web_search", arguments: { query: "detalhes" } });
+  ui.toolResult(
+    { name: "web_search" },
+    { ok: true, results: Array(5).fill({}), provider: "duckduckgo" },
+  );
+  assertInput();
+  for (let i = 0; i < 40; i++) ui.print("ACTUAL_TOOL_OUTPUT " + i);
+  assertInput();
+  assert.ok(
+    screen.scrollback.some((line) => line.includes("ACTUAL_TOOL_OUTPUT")),
+  );
+  assert.ok(
+    !screen.scrollback.some(
+      (line) => /─{10}|BUILD/.test(line) || line.trim() === "❯",
+    ),
+  );
+  ui.start("text", "agent");
+  ui.stop("agent");
+  ui.answer("Resposta final com os detalhes.");
+  assertInput();
+  const next = ui.ask("  ❯ ", { commands: true });
+  assertInput();
+  input.write("próximo pedido\r");
+  assert.equal(await next, "próximo pedido");
+});
+
+test("Background input preserves its draft across progress, tools, resize and the next chat prompt", async (t) => {
+  const { ui, input, output, screen, session, model, stats } = terminal(t);
+  ui.status(session, model, "text", stats);
+  const request = ui.ask("  ❯ ", { commands: true });
+  input.write("Pedido inicial\r");
+  await request;
+  const questions = [];
+  ui.onBackgroundLine = (line) => questions.push(line);
+  ui.start("text", "agent");
+  input.write("/btw deta");
+  ui.answer("Comentário intermediário.", "agent", { phase: "progress" });
+  ui.tool({ name: "read_file", arguments: { path: "README.md" } });
+  ui.drawProgress();
+  assert.match(screen.line(ui.stdout.rows - 2), /❯ \/btw deta$/);
+  assert.equal(screen.current.y, ui.stdout.rows - 2);
+  output.rows = 30;
+  output.columns = 80;
+  screen.resize(30, 80);
+  output.emit("resize");
+  assert.match(screen.line(ui.stdout.rows - 2), /❯ \/btw deta$/);
+  input.write("lhes\r");
+  assert.deepEqual(questions, ["/btw detalhes"]);
+  assert.equal(ui.queue.length, 0);
+  assert.equal(screen.line(ui.stdout.rows - 2).trim(), "❯");
+  input.write("rascunho do próximo pedido");
+  input.write("\x1b[D");
+  ui.stop("agent");
+  ui.answer("Resposta concluída.");
+  const next = ui.ask("  ❯ ", { commands: true });
+  assert.match(screen.line(ui.stdout.rows - 2), /rascunho do próximo pedido/);
+  input.write("!\r");
+  assert.equal(await next, "rascunho do próximo pedid!o");
+});
+
+test("Background drafts and the input panel return after approvals, pickers and masked prompts", async (t) => {
+  const { ui, input, output, screen, session, model, stats, capture } =
+    terminal(t);
+  ui.status(session, model, "text", stats);
+  const request = ui.ask("  ❯ ", { commands: true });
+  input.write("Pedido inicial\r");
+  await request;
+  input.write("KEEP_BACKGROUND_DRAFT");
+  const assertInput = () => {
+    assert.match(screen.line(ui.stdout.rows - 3), /─{10}/);
+    assert.match(screen.line(ui.stdout.rows - 2), /KEEP_BACKGROUND_DRAFT/);
+    assert.match(screen.line(ui.stdout.rows - 1), /─{10}/);
+    assert.equal(screen.current.bottom, ui.stdout.rows - 4);
+  };
+  const approval = ui.confirm({
+    name: "shell",
+    arguments: { command: "node --version" },
+  });
+  input.write("1");
+  assert.equal(await approval, "once");
+  assertInput();
+  const question = ui.ask("  Provider ID: ");
+  input.write("local\r");
+  assert.equal(await question, "local");
+  assertInput();
+  const picker = ui.select({
+    title: "MODELOS",
+    items: [{ value: "a", label: "A" }],
+  });
+  input.emit("keypress", "", { name: "escape" });
+  assert.equal(await picker, null);
+  assertInput();
+  const secret = ui.ask("  API key: ", { secret: true });
+  input.write("PRIVATE_TEST_VALUE");
+  output.rows = 30;
+  output.columns = 80;
+  screen.resize(30, 80);
+  output.emit("resize");
+  input.write("\r");
+  assert.equal(await secret, "PRIVATE_TEST_VALUE");
+  assertInput();
+  assert.ok(!capture().includes("PRIVATE_TEST_VALUE"));
+  const next = ui.ask("  ❯ ", { commands: true });
+  input.write("\r");
+  assert.equal(await next, "KEEP_BACKGROUND_DRAFT");
+});
+
 test("Slash commands stay compact and cancelled drafts are not committed as user messages", async (t) => {
   const { ui, input, session, model, stats, capture } = terminal(t);
   ui.status(session, model, "native", stats);
@@ -658,7 +785,9 @@ test("Autocomplete and session picker preserve their highlighted item and query 
   input.write("\r");
   assert.equal(await selected, "b");
   assert.equal(screen.current, screen.main);
-  assert.equal(screen.current.bottom, ui.stdout.rows - 1);
+  assert.equal(screen.current.bottom, ui.stdout.rows - 4);
+  assert.match(screen.line(ui.stdout.rows - 3), /─{10}/);
+  assert.equal(screen.line(ui.stdout.rows - 2).trim(), "❯");
   const content = screen.current.lines
     .slice(0, ui.stdout.rows)
     .map((row) => row.join(""))

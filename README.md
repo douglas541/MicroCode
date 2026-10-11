@@ -301,6 +301,8 @@ Snapshots de shell têm limites de **1 MiB por arquivo, 16 MiB por varredura e 5
 
 Em um terminal interativo com espaço disponível, o MicroCode mantém a barra de status **fixa na parte inferior**, com o prompt acima dela. O rodapé ocupa **uma linha em janelas largas e, no máximo, duas nas menores**, usando o nome legível do modelo, modo de trabalho, percentual de contexto, tokens, velocidade e custo. Informações completas, como o ID do modelo/sessão e a janela de contexto em tokens, ficam em `/status`. O suporte a tools nativas aparece no seletor de modelos, não no rodapé. Os valores são atualizados na própria barra durante a geração e após cada resposta, sem adicionar cópias desse bloco à conversa.
 
+Após enviar um pedido, a **área de entrada continua visível entre as duas barras**, acima do status, durante a geração e execução de ferramentas. Apenas a conversa acima dela rola. É possível digitar `/btw` durante a execução ou preparar um próximo pedido; o rascunho e a posição do cursor são preservados durante updates, redimensionamentos e retorno de diálogos.
+
 O histórico rola na área acima do rodapé. Sugestões de comandos, seletores e menus de aprovação compartilham essa área e preservam a barra. Ao redimensionar, a conversa é redesenhada a partir do texto original na nova largura, e o painel aberto, sua seleção e a digitação são preservados. A barra usa menos linhas em janelas compactas. Ao sair, a região de rolagem normal do terminal é restaurada. Em saída redirecionada/sem TTY ou em janelas extremamente pequenas, é usada a saída textual normal.
 
 ### Markdown nas respostas
@@ -391,7 +393,7 @@ Referências dos providers: [OpenRouter](https://openrouter.ai/docs), [OpenCode 
 
 ## Publicação no npm
 
-O pacote é **`@microcode-org/microcode`** e instala o comando **`microcode`**. A versão inicial é **`0.1.0`**. A conta que publica precisa ter permissão na organização npm **`microcode-org`**.
+O pacote é **`@microcode-org/microcode`** e instala o comando **`microcode`**. A versão em `package.json` define tanto os metadados publicados no npm quanto a versão exibida pelo app. A conta que publica precisa ter permissão na organização npm **`microcode-org`**.
 
 Na pasta deste repositório, com Node.js 22+ e pnpm 12.10.1:
 
