@@ -44,4 +44,4 @@ jobs:
       - name: Inspect package contents
         run: npm pack --dry-run
       - name: Publish ${{ steps.version.outputs.version }} to npm
-        run: npm publish
+        run: npm publish --loglevel verbose
