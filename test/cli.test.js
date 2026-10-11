@@ -10,10 +10,19 @@ import { temp, server, chatReply } from "./helpers.js";
 
 const bin = fileURLToPath(new URL("../bin/microcode.js", import.meta.url));
 
+function cliEnvironment(overrides = {}) {
+  const env = { ...process.env, ...overrides, NO_COLOR: "1" };
+  // npm/pnpm may force colors, but these piped CLI tests require plain output.
+  for (const name of Object.keys(env)) {
+    if (name.toUpperCase() === "FORCE_COLOR") delete env[name];
+  }
+  return env;
+}
+
 function processRun(args, input, env) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [bin, ...args], {
-      env: { ...process.env, ...env, NO_COLOR: "1" },
+      env: cliEnvironment(env),
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
@@ -118,7 +127,11 @@ test("Full CLI runs text tools, /btw, config, /compact, /export and /resume with
   const result = await processRun(
     ["--cwd", cwd],
     "/model demo\nCrie hello.txt\n/btw o que mudou?\nSegundo pedido\n/compact\n/config compaction.threshold 0.7\n/rename Sessão teste\n/export export.md\n/status\n/cost\n/exit\n",
-    { MICROCODE_HOME: home, MICROCODE_TEST_KEY: "dummy-test" },
+    {
+      MICROCODE_HOME: home,
+      MICROCODE_TEST_KEY: "dummy-test",
+      FORCE_COLOR: "1",
+    },
   );
   assert.equal(result.code, 0, result.stdout + result.stderr);
   assert.equal(result.stderr, "");
@@ -136,7 +149,7 @@ test("Full CLI runs text tools, /btw, config, /compact, /export and /resume with
   assert.equal(session.compactions, 1);
   assert.match(
     await readFile(path.join(cwd, "export.md"), "utf8"),
-    /MICROCODE_CONTEXT_SUMMARY/,
+    /Crie hello\.txt/,
   );
   const resumed = await processRun(
     ["--cwd", cwd, "--resume", session.id],
@@ -145,6 +158,9 @@ test("Full CLI runs text tools, /btw, config, /compact, /export and /resume with
   );
   assert.equal(resumed.code, 0);
   assert.match(resumed.stdout, new RegExp(session.id.slice(0, 8)));
+  assert.match(resumed.stdout, /HISTÓRICO DA SESSÃO/);
+  assert.match(resumed.stdout, /Crie hello/);
+  assert.match(resumed.stdout, /Segundo turno concluído/);
 });
 
 test("Single-prompt CLI native mode invokes real local tools and prints final answer", async (t) => {
@@ -261,7 +277,7 @@ test("/btw can run while a main inference is still pending without contaminating
     selected: { provider: "local", model: "demo" },
   });
   const child = spawn(process.execPath, [bin, "--cwd", cwd], {
-    env: { ...process.env, MICROCODE_HOME: home, NO_COLOR: "1" },
+    env: cliEnvironment({ MICROCODE_HOME: home }),
     stdio: ["pipe", "pipe", "pipe"],
   });
   let output = "";

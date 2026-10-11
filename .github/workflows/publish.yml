@@ -1,0 +1,47 @@
+name: Publish MicroCode
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: microcode-npm-publish
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    uses: ./.github/workflows/test.yml
+
+  publish:
+    needs: verify
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org/
+          package-manager-cache: false
+      - name: Install pinned pnpm dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Use npm with Trusted Publishing support
+        run: npm install --global npm@11
+      - name: Select an unpublished version
+        id: version
+        run: node scripts/release-version.js
+      - name: Inspect package contents
+        run: npm pack --dry-run
+      - name: Publish ${{ steps.version.outputs.version }} to npm
+        run: npm publish

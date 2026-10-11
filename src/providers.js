@@ -62,7 +62,7 @@ export async function catalog(
   id,
   provider,
   store,
-  { refresh = false, fetchImpl = fetch } = {},
+  { refresh = false, fetchImpl = fetch, signal } = {},
 ) {
   const cacheName = `catalogs/${id}.json`;
   const cached = await store.read(cacheName, null);
@@ -80,6 +80,7 @@ export async function catalog(
       headers,
       timeout: 30000,
       fetchImpl,
+      signal,
     });
     const data = await response.json();
     if (!Array.isArray(data.data))
@@ -96,7 +97,7 @@ export async function catalog(
         throw new Error("Paginação inválida no catálogo.");
       visited.add(url.href);
       const page = await (
-        await request(url.href, { key, timeout: 30000, fetchImpl })
+        await request(url.href, { key, timeout: 30000, fetchImpl, signal })
       ).json();
       if (!Array.isArray(page.data))
         throw new Error("Página de catálogo inválida.");
@@ -115,6 +116,7 @@ export async function catalog(
         const res = await request("https://models.dev/api.json", {
           timeout: 30000,
           fetchImpl,
+          signal,
         });
         metadata = (await res.json())[provider.catalog]?.models || {};
       } catch {
@@ -134,6 +136,7 @@ export async function catalog(
     await store.write(cacheName, result);
     return { ...result, stale: false };
   } catch (error) {
+    if (signal?.aborted) throw signal.reason;
     if (cached?.baseURL === provider.baseURL)
       return { ...cached, stale: true, warning: error.message };
     throw error;

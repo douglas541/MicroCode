@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
-import { request, events, APIError } from "./http.js";
+import { request, events, APIError, requestTiming, apiError } from "./http.js";
 import { textHistory } from "./text-tools.js";
 
 function parseArguments(raw) {
@@ -245,6 +245,8 @@ export async function complete({
   signal,
   onToken = () => {},
   fetchImpl = fetch,
+  retry,
+  onRetry,
 }) {
   const { endpoint, body } = buildRequest({
     model,
@@ -267,6 +269,8 @@ export async function complete({
     body,
     signal,
     fetchImpl,
+    retry,
+    onRetry,
   });
   const result = {
     content: "",
@@ -289,10 +293,12 @@ export async function complete({
   const iterable = response.headers
     .get("content-type")
     ?.includes("text/event-stream")
-    ? events(response)
+    ? events(response, { key })
     : [await response.json()];
   for await (const e of iterable) {
     if (signal?.aborted) throw signal.reason;
+    if (e.error || e.type === "error")
+      throw apiError(e, 0, { key, streamStarted: true });
     if ((received += JSON.stringify(e).length) > 8 * 1024 * 1024)
       throw new APIError("Resposta excedeu 8 MB.");
     if (model.protocol === "messages") {
@@ -349,8 +355,14 @@ export async function complete({
         ended = true;
       }
       if (e.type === "response.failed")
-        throw new APIError(
-          e.response?.error?.message || "Falha no endpoint Responses.",
+        throw apiError(
+          {
+            error: e.response?.error || {
+              message: "Falha no endpoint Responses.",
+            },
+          },
+          0,
+          { key, streamStarted: true },
         );
     } else if (model.protocol === "google") {
       const candidate = e.candidates?.[0];
@@ -377,7 +389,6 @@ export async function complete({
           `Geração bloqueada: ${e.promptFeedback.blockReason}`,
         );
     } else {
-      if (e.error) throw new APIError(e.error.message || "Erro da API.");
       const choice = e.choices?.[0];
       const delta = choice?.delta || choice?.message;
       if (delta?.content) emit(delta.content);
@@ -453,6 +464,8 @@ export async function complete({
       name: t.name,
       arguments: parseArguments(t.raw),
     }));
-  result.durationMs = performance.now() - start;
+  const timing = requestTiming(response);
+  result.durationMs = performance.now() - (timing?.startedAt ?? start);
+  result.retries = timing?.retries ?? 0;
   return result;
 }

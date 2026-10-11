@@ -1,5 +1,5 @@
 {
-  "name": "microcode-agent",
+  "name": "@microcode-org/microcode",
   "version": "0.1.0",
   "description": "Terminal coding agent with native and text-based tool calling",
   "repository": {
@@ -7,6 +7,9 @@
     "url": "git+ssh://git@github.com/douglas541/MicroCode.git"
   },
   "homepage": "https://github.com/douglas541/MicroCode#readme",
+  "bugs": {
+    "url": "https://github.com/douglas541/MicroCode/issues"
+  },
   "type": "module",
   "packageManager": "pnpm@12.10.1",
   "bin": {
@@ -15,12 +18,17 @@
   "scripts": {
     "start": "node bin/microcode.js",
     "test": "node --test",
-    "check": "node scripts/check.js"
+    "check": "node scripts/check.js",
+    "prepublishOnly": "pnpm check && pnpm test"
   },
   "engines": {
     "node": ">=22"
   },
   "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "files": [
     "bin",
     "src",

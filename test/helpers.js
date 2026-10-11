@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
@@ -9,7 +9,7 @@ import { Agent } from "../src/agent.js";
 export async function temp(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), "microcode-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  return root;
+  return await realpath(root);
 }
 
 export function chatReply(content, toolCalls = []) {

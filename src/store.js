@@ -1,7 +1,15 @@
-import { mkdir, readFile, writeFile, rename, readdir } from "node:fs/promises";
+import {
+  mkdir,
+  readFile,
+  writeFile,
+  rename,
+  readdir,
+  unlink,
+} from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { normalizeApiKey } from "./credentials.js";
 
 export const PRESETS = {
   openrouter: {
@@ -61,6 +69,12 @@ export class Store {
       maxSteps: 25,
       maxTokens: 8192,
       ...saved,
+      retry: {
+        maxRetries: 2,
+        baseDelayMs: 1500,
+        maxDelayMs: 60000,
+        ...saved.retry,
+      },
       compaction: {
         auto: true,
         threshold: 0.8,
@@ -72,11 +86,24 @@ export class Store {
     };
   }
   async key(id, provider) {
-    return process.env[provider.env] || (await this.read("auth.json", {}))[id];
+    return (await this.credential(id, provider)).key;
+  }
+  async credential(id, provider) {
+    const environment = process.env[provider.env];
+    const saved = (await this.read("auth.json", {}))[id];
+    const preferSaved = provider.keySource === "saved";
+    const raw = preferSaved ? saved || environment : environment || saved;
+    const source = !raw
+      ? "none"
+      : (preferSaved && saved) || !environment
+        ? "saved"
+        : "environment";
+    const key = normalizeApiKey(raw) || undefined;
+    return { key, source, normalized: Boolean(raw && key !== raw) };
   }
   async setKey(id, key) {
     const auth = await this.read("auth.json", {});
-    if (key) auth[id] = key;
+    if (key) auth[id] = normalizeApiKey(key);
     else delete auth[id];
     await this.write("auth.json", auth);
   }
@@ -107,7 +134,32 @@ export class Store {
     if (!session || path.resolve(session.cwd) !== path.resolve(cwd))
       throw new Error("Sessão não encontrada neste diretório.");
     session.messages = repairHistory(session.messages);
+    session.toolApprovals = {
+      edits: session.toolApprovals?.edits === true,
+      shell: Array.isArray(session.toolApprovals?.shell)
+        ? session.toolApprovals.shell.filter(
+            (rule) =>
+              rule &&
+              typeof rule.command === "string" &&
+              typeof rule.cwd === "string",
+          )
+        : [],
+    };
     return session;
+  }
+  async deleteSession(id, cwd) {
+    if (typeof id !== "string" || !/^[\w-]+$/.test(id))
+      throw new Error("ID de sessão inválido.");
+    const operation = this.writes.then(async () => {
+      const name = `sessions/${id}.json`;
+      const session = await this.read(name, null);
+      if (!session || path.resolve(session.cwd) !== path.resolve(cwd))
+        throw new Error("Sessão não encontrada neste diretório.");
+      await unlink(path.join(this.home, name));
+      return { id, title: session.title };
+    });
+    this.writes = operation.catch(() => {});
+    return operation;
   }
 }
 
@@ -148,9 +200,11 @@ export function newSession(cwd, selected) {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     messages: [],
+    archivedMessages: [],
     usage: [],
     checkpoints: [],
     addedDirs: [],
+    toolApprovals: { edits: false, shell: [] },
     plan: false,
   };
 }

@@ -1,0 +1,53 @@
+// One catalog drives Tab completion, the slash menu and command descriptions.
+export const COMMAND_DEFINITIONS = [
+  { name: "/help", description: "Mostrar ajuda e todos os comandos" },
+  { name: "/connect", description: "Conectar um provider e validar a API key" },
+  { name: "/login", description: "Adicionar conexão com um provider" },
+  { name: "/logout", description: "Remover a API key salva do provider" },
+  { name: "/provider", description: "Escolher ou gerenciar providers" },
+  { name: "/models", description: "Pesquisar e selecionar modelos" },
+  { name: "/model", description: "Escolher um modelo pelo ID ou seletor" },
+  { name: "/tools", description: "Modo de ferramentas: auto, native ou text" },
+  { name: "/status", description: "Modelo, sessão, tokens e custo" },
+  { name: "/cost", description: "Custos e tokens acumulados da sessão" },
+  { name: "/context", description: "Uso da janela de contexto e compactação" },
+  { name: "/config", description: "Ver ou alterar preferências" },
+  {
+    name: "/permissions",
+    description: "Ver permissões, mudar modo ou resetar autorizações",
+  },
+  { name: "/plan", description: "Alternar planejamento somente leitura" },
+  { name: "/compact", description: "Compactar o histórico da conversa" },
+  {
+    name: "/btw",
+    description: "Fazer uma pergunta lateral",
+    needsArgument: true,
+  },
+  { name: "/clear", description: "Iniciar uma nova sessão" },
+  { name: "/resume", description: "Retomar uma sessão anterior" },
+  { name: "/rename", description: "Renomear a sessão", needsArgument: true },
+  { name: "/export", description: "Exportar a conversa para Markdown" },
+  {
+    name: "/rewind",
+    description: "Escolher turnos e restaurar arquivos capturados",
+  },
+  { name: "/undo", description: "Reverter turnos e arquivos capturados" },
+  { name: "/init", description: "Inspecionar localmente e gerar AGENTS.md" },
+  {
+    name: "/memory",
+    description: "Listar, adicionar, editar ou remover memória do projeto",
+  },
+  {
+    name: "/add-dir",
+    description: "Autorizar um diretório adicional",
+    needsArgument: true,
+  },
+  { name: "/diff", description: "Mostrar alterações do Git" },
+  {
+    name: "/doctor",
+    description: "Diagnosticar runtime, provider e autenticação",
+  },
+  { name: "/paste", description: "Escrever ou colar um pedido multilinha" },
+  { name: "/exit", description: "Sair do MicroCode" },
+  { name: "/quit", description: "Sair do MicroCode" },
+];

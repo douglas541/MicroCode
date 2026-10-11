@@ -79,6 +79,7 @@ export function recordUsage(result, model, inputText) {
     seconds: duration,
     tps: usage.output / duration,
     model: model.id,
+    retries: result.retries || 0,
     at: new Date().toISOString(),
   };
 }

@@ -7,6 +7,8 @@ import {
   flattenHistory,
 } from "./text-tools.js";
 import { recordUsage } from "./metrics.js";
+import { archiveMessages } from "./history.js";
+import { createCheckpoint, recordChange } from "./checkpoints.js";
 import {
   contextStats,
   compactionSplit,
@@ -65,6 +67,11 @@ export class Agent {
     signal,
     purpose = "agent",
   }) {
+    if (purpose === "agent")
+      this.ui.context?.(
+        contextStats(system, messages, tools, this.model, this.config),
+        mode,
+      );
     this.ui.start?.(mode, purpose);
     let result;
     try {
@@ -80,8 +87,26 @@ export class Agent {
         sessionId: this.session.id,
         signal,
         fetchImpl: this.fetchImpl,
+        retry: this.config.retry,
+        onRetry: ({ error, attempt, maxRetries, waitMs }) =>
+          this.ui.notice?.(
+            `HTTP 429${error.provider ? " / " + error.provider : ""}: aguardando ${(waitMs / 1000).toFixed(1)}s para retentativa ${attempt}/${maxRetries} (${this.model.id}).`,
+          ),
         onToken: (token) => this.ui.token?.(token, mode, purpose),
       });
+    } catch (error) {
+      if (!signal?.aborted) {
+        this.session.lastError = {
+          status: error.status || 0,
+          message: error.message,
+          provider: error.provider || null,
+          attempts: error.attempts || 1,
+          model: this.model.id,
+          at: new Date().toISOString(),
+        };
+        await this.save();
+      }
+      throw error;
     } finally {
       this.ui.stop?.(purpose);
     }
@@ -94,23 +119,20 @@ export class Agent {
       purpose,
     };
     this.session.usage.push(usage);
+    delete this.session.lastError;
     this.ui.usage?.(usage);
     await this.save();
     return result;
   }
   async run(input, signal) {
-    const checkpoint = {
-      messageIndex: this.session.messages.length,
-      title: input.slice(0, 100),
-      changes: [],
-      shellUsed: false,
-    };
-    this.session.checkpoints.push(checkpoint);
-    if (this.session.checkpoints.length > 10) this.session.checkpoints.shift();
+    const checkpoint = createCheckpoint(this.session, input);
     this.runner.onChange = async (change) => {
-      const existing = checkpoint.changes.find((c) => c.path === change.path);
-      if (existing) existing.after = change.after;
-      else checkpoint.changes.push(change);
+      recordChange(checkpoint, change);
+      await this.save();
+    };
+    this.runner.onShellTracked = async (coverage) => {
+      checkpoint.shellUsed = true;
+      (checkpoint.shellCoverage ??= []).push(coverage);
       await this.save();
     };
     this.session.messages.push({ role: "user", content: input });
@@ -188,7 +210,9 @@ export class Agent {
       }
       malformed = 0;
       this.session.historyMode = mode;
-      this.ui.answer?.(content);
+      this.ui.answer?.(content, "agent", {
+        phase: calls.length ? "progress" : "final",
+      });
       const message = {
         role: "assistant",
         content,
@@ -355,6 +379,7 @@ export class Agent {
         reason:
           "O resumo não reduziu o contexto; histórico original preservado.",
       };
+    archiveMessages(this.session, older);
     this.session.messages = compacted;
     this.session.compactions = (this.session.compactions || 0) + 1;
     const cut = original.length - recent.length;
