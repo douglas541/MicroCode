@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { PassThrough, Writable } from "node:stream";
-import { UI } from "../src/ui.js";
+import { readFile } from "node:fs/promises";
+import { UI, clean } from "../src/ui.js";
 import { PickerState } from "../src/picker.js";
 import path from "node:path";
 import { Application } from "../src/cli.js";
@@ -371,12 +372,15 @@ test("Chat prompt keeps history and ordinary text editing outside the command me
   assert.equal(await edited, "texto");
 });
 
-test("Banner uses a clean code mark and a Portuguese descriptor", (t) => {
+test("Banner uses a clean code mark, the manifest version and a Portuguese descriptor", async (t) => {
   const { ui, text } = terminal(t);
+  const { version } = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8"),
+  );
   ui.banner("/project/MicroCode");
   assert.match(text(), /<\/>  MicroCode/);
   assert.match(text(), /Agente de código para o terminal/);
-  assert.match(text(), /v0\.1\.0/);
+  assert.equal(clean(text()).match(/\bv(\S+)\s*$/m)?.[1], version);
   assert.ok(!text().includes("▗▄▖"));
   assert.ok(!text().includes("native intelligence"));
 });
